@@ -1,0 +1,643 @@
+import "./Settings.css";
+
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { changePassword, deleteMyAccount } from "../api/authApi";
+import { getMyReports } from "../api/reportApi";
+
+import Navbar from "../components/Navbar";
+import Sidebar from "../components/Sidebar";
+import Footer from "../components/Footer";
+
+import {
+  FaBell,
+  FaCheckCircle,
+  FaCog,
+  FaCommentDots,
+  FaDownload,
+  FaEnvelope,
+  FaKey,
+  FaLock,
+  FaMapMarkerAlt,
+  FaRedo,
+  FaShieldAlt,
+  FaSignOutAlt,
+  FaTimes,
+  FaTrash,
+  FaUserShield,
+  FaPalette,
+  FaSun,
+  FaMoon,
+  FaDesktop,
+} from "react-icons/fa";
+import { setThemePreference, useThemePreference } from "../utils/theme";
+
+const THEME_OPTIONS = [
+  { value: "light", label: "Light", icon: FaSun },
+  { value: "dark", label: "Dark", icon: FaMoon },
+  { value: "system", label: "System", icon: FaDesktop },
+];
+import { toast } from "../utils/notify";
+
+const SETTINGS_KEY = "lostFoundSettings";
+
+const defaultSettings = {
+  emailNotifications: true,
+  matchAlerts: true,
+  commentAlerts: true,
+  verificationAlerts: true,
+  weeklySummary: false,
+  showPhoneNumber: true,
+  allowPostSharing: true,
+  defaultCity: "Gujranwala",
+  defaultReportType: "Person",
+};
+
+const safeParse = (value, fallback = null) => {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+export default function Settings() {
+  const themePreference = useThemePreference();
+  const navigate = useNavigate();
+  const { logout, currentUser } = useAuth();
+
+  const [settings, setSettings] = useState(defaultSettings);
+  const [message, setMessage] = useState("");
+  const [confirmAction, setConfirmAction] = useState(null);
+
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+
+  useEffect(() => {
+    const loadSettings = () => {
+      const savedSettings = safeParse(localStorage.getItem(SETTINGS_KEY));
+
+      setSettings({
+        ...defaultSettings,
+        ...(savedSettings || {}),
+      });
+
+    };
+
+    loadSettings();
+
+    window.addEventListener("storage", loadSettings);
+    window.addEventListener("authChanged", loadSettings);
+    window.addEventListener("profileUpdated", loadSettings);
+
+    return () => {
+      window.removeEventListener("storage", loadSettings);
+      window.removeEventListener("authChanged", loadSettings);
+      window.removeEventListener("profileUpdated", loadSettings);
+    };
+  }, []);
+
+  const activeSettingsCount = useMemo(() => {
+    return [
+      settings.emailNotifications,
+      settings.matchAlerts,
+      settings.commentAlerts,
+      settings.verificationAlerts,
+      settings.weeklySummary,
+      settings.showPhoneNumber,
+      settings.allowPostSharing,
+    ].filter(Boolean).length;
+  }, [settings]);
+
+  const showMessage = (text) => {
+    setMessage(text);
+
+    setTimeout(() => {
+      setMessage("");
+    }, 3000);
+  };
+
+  const saveSettings = (nextSettings, text = "Settings saved successfully.") => {
+    setSettings(nextSettings);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(nextSettings));
+    showMessage(text);
+  };
+
+  const handleToggle = (key) => {
+    saveSettings({
+      ...settings,
+      [key]: !settings[key],
+    });
+  };
+
+  const handleChange = (key, value) => {
+    saveSettings({
+      ...settings,
+      [key]: value,
+    });
+  };
+
+  const handlePasswordChange = (e) => {
+    setPasswordData({
+      ...passwordData,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+ 
+  const handlePasswordSubmit = async (e) => {
+  e.preventDefault();
+
+  if (
+    !passwordData.currentPassword ||
+    !passwordData.newPassword ||
+    !passwordData.confirmPassword
+  ) {
+    toast("Please fill all password fields.");
+    return;
+  }
+
+  const passwordRegex =
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
+
+  if (!passwordRegex.test(passwordData.newPassword)) {
+    toast(
+      "Password must contain uppercase, lowercase, number, special character and minimum 8 characters."
+    );
+    return;
+  }
+
+  if (passwordData.newPassword !== passwordData.confirmPassword) {
+    toast("New password and confirm password do not match.");
+    return;
+  }
+
+  try {
+    const response = await changePassword({
+      oldPassword: passwordData.currentPassword,
+      newPassword: passwordData.newPassword,
+    });
+
+    setPasswordData({
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    });
+
+    showMessage(response?.message || "Password changed successfully.");
+  } catch (error) {
+    toast(error.message || "Failed to change password.");
+  }
+};
+
+  const handleExportData = async () => {
+    try {
+      const response = await getMyReports();
+      const ownReports = Array.isArray(response?.reports) ? response.reports : [];
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        currentUser,
+        settings,
+        myReportsCount: ownReports.length,
+        myReports: ownReports,
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: "application/json",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = "lost-found-user-data.json";
+      link.click();
+
+      URL.revokeObjectURL(url);
+      showMessage("Your data file has been downloaded.");
+    } catch (error) {
+      toast(error.message || "Unable to export your data.");
+    }
+  };
+
+  const handleResetSettings = () => {
+    saveSettings(defaultSettings, "Settings restored to default.");
+    setConfirmAction(null);
+  };
+
+  const handleLogout = () => {
+    logout?.();
+    setConfirmAction(null);
+    toast("You have been logged out.");
+    navigate("/login");
+  };
+
+ const handleDeleteAccount = async () => {
+  if (currentUser?.role === "Admin" || currentUser?.backendRole === "admin") {
+    toast("Admin account cannot be deleted from settings.");
+    setConfirmAction(null);
+    return;
+  }
+
+  try {
+    const response = await deleteMyAccount();
+
+    localStorage.removeItem(SETTINGS_KEY);
+    logout?.();
+
+    setConfirmAction(null);
+
+    toast(response?.message || "Account deleted successfully.");
+    navigate("/signup");
+  } catch (error) {
+    toast(error.message || "Failed to delete account.");
+  }
+};
+
+  const renderSwitch = (key, title, description, icon) => {
+    return (
+      <div className="settings-option">
+        <div className="settings-option__icon">{icon}</div>
+
+        <div className="settings-option__content">
+          <h3>{title}</h3>
+          <p>{description}</p>
+        </div>
+
+        <button
+          type="button"
+          className={`settings-switch ${
+            settings[key] ? "settings-switch--active" : ""
+          }`}
+          onClick={() => handleToggle(key)}
+        >
+          <span></span>
+        </button>
+      </div>
+    );
+  };
+
+  const getConfirmData = () => {
+    if (confirmAction === "reset") {
+      return {
+        icon: <FaRedo />,
+        title: "Reset Settings?",
+        text: "All preferences will be restored to default values.",
+        buttonText: "Reset Settings",
+        action: handleResetSettings,
+        danger: false,
+      };
+    }
+
+    if (confirmAction === "logout") {
+      return {
+        icon: <FaSignOutAlt />,
+        title: "Logout Account?",
+        text: "Your current session will be removed from this browser.",
+        buttonText: "Logout",
+        action: handleLogout,
+        danger: false,
+      };
+    }
+
+    return {
+      icon: <FaTrash />,
+      title: "Delete Account?",
+      text: "This will delete your account from the database and clear your current session from this browser.",
+      buttonText: "Delete Account",
+      action: handleDeleteAccount,
+      danger: true,
+    };
+  };
+
+  const confirmData = confirmAction ? getConfirmData() : null;
+
+  return (
+    <div className="settings-page">
+      <Navbar />
+
+      <div className="settings__container">
+        <Sidebar />
+
+        <main className="settings__main">
+          <section className="settings-hero">
+            <div>
+              <h1>Settings</h1>
+
+              <p>
+                Manage your account preferences, notifications, security and
+                report defaults.
+              </p>
+            </div>
+
+            <div className="settings-hero__badge">
+              <FaCog />
+              {activeSettingsCount} Active Settings
+            </div>
+          </section>
+
+          {message && (
+            <div className="settings-message">
+              <FaCheckCircle />
+              {message}
+
+              <button type="button" onClick={() => setMessage("")}>
+                <FaTimes />
+              </button>
+            </div>
+          )}
+
+          <section className="settings-grid">
+            <div className="settings-card settings-card--wide">
+              <div className="settings-card__heading">
+                <div>
+                  <h2>Appearance</h2>
+                  <p>Choose a light or dark look. System follows your phone or computer setting.</p>
+                </div>
+
+                <FaPalette />
+              </div>
+
+              <div className="settings-theme" role="radiogroup" aria-label="Theme">
+                {THEME_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={themePreference === option.value}
+                    className={`settings-theme__option ${themePreference === option.value ? "is-active" : ""}`}
+                    onClick={() => setThemePreference(option.value)}
+                  >
+                    <option.icon aria-hidden="true" />
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="settings-card">
+              <div className="settings-card__heading">
+                <div>
+                  <h2>Notifications</h2>
+                  <p>Control alerts about reports, comments and matches.</p>
+                </div>
+
+                <FaBell />
+              </div>
+
+              <div className="settings-options-list">
+                {renderSwitch(
+                  "emailNotifications",
+                  "Email Notifications",
+                  "Receive important updates by email.",
+                  <FaEnvelope />
+                )}
+
+                {renderSwitch(
+                  "matchAlerts",
+                  "Match Alerts",
+                  "Notify when a possible match is found or confirmed.",
+                  <FaShieldAlt />
+                )}
+
+                {renderSwitch(
+                  "commentAlerts",
+                  "Comment Alerts",
+                  "Notify when another user comments on your report.",
+                  <FaCommentDots />
+                )}
+
+                {renderSwitch(
+                  "verificationAlerts",
+                  "Verification Alerts",
+                  "Notify when admin verifies, rejects or updates your report.",
+                  <FaUserShield />
+                )}
+
+                {renderSwitch(
+                  "weeklySummary",
+                  "Weekly Summary",
+                  "Receive a weekly summary of your report activity.",
+                  <FaBell />
+                )}
+              </div>
+            </div>
+
+            <div className="settings-card">
+              <div className="settings-card__heading">
+                <div>
+                  <h2>Privacy & Sharing</h2>
+                  <p>Control basic public contact and sharing preferences.</p>
+                </div>
+
+                <FaLock />
+              </div>
+
+              <div className="settings-options-list">
+                {renderSwitch(
+                  "showPhoneNumber",
+                  "Show Phone Number",
+                  "Allow your contact number to appear on your own reports.",
+                  <FaKey />
+                )}
+
+                {renderSwitch(
+                  "allowPostSharing",
+                  "Allow Post Sharing",
+                  "Allow other users to share your public report details.",
+                  <FaDownload />
+                )}
+              </div>
+            </div>
+
+            <div className="settings-card">
+              <div className="settings-card__heading">
+                <div>
+                  <h2>Report Defaults</h2>
+                  <p>Set default values used while creating reports.</p>
+                </div>
+
+                <FaMapMarkerAlt />
+              </div>
+
+              <div className="settings-form">
+                <div className="settings-field">
+                  <label>Default City</label>
+
+                  <input
+                    type="text"
+                    value={settings.defaultCity}
+                    onChange={(e) => handleChange("defaultCity", e.target.value)}
+                    placeholder="Enter default city"
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label>Default Report Category</label>
+
+                  <select
+                    value={settings.defaultReportType}
+                    onChange={(e) =>
+                      handleChange("defaultReportType", e.target.value)
+                    }
+                  >
+                    <option>Person</option>
+                    <option>Item</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-card">
+              <div className="settings-card__heading">
+                <div>
+                  <h2>Security</h2>
+                  <p>Change your account password.</p>
+                </div>
+
+                <FaKey />
+              </div>
+
+              <form className="settings-form" onSubmit={handlePasswordSubmit}>
+                <div className="settings-field">
+                  <label>Current Password</label>
+
+                  <input
+                    type="password"
+                    name="currentPassword"
+                    value={passwordData.currentPassword}
+                    onChange={handlePasswordChange}
+                    placeholder="Enter current password"
+                    required
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label>New Password</label>
+
+                  <input
+                    type="password"
+                    name="newPassword"
+                    value={passwordData.newPassword}
+                    onChange={handlePasswordChange}
+                    placeholder="Enter new password"
+                    required
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label>Confirm New Password</label>
+
+                  <input
+                    type="password"
+                    name="confirmPassword"
+                    value={passwordData.confirmPassword}
+                    onChange={handlePasswordChange}
+                    placeholder="Confirm new password"
+                    required
+                  />
+                </div>
+
+                <button type="submit" className="settings-save-btn">
+                  Change Password
+                </button>
+              </form>
+            </div>
+
+            <div className="settings-card settings-card--wide">
+              <div className="settings-card__heading">
+                <div>
+                  <h2>Account Actions</h2>
+                  <p>Export your data, reset settings or manage your session.</p>
+                </div>
+
+                <FaCog />
+              </div>
+
+              <div className="settings-actions">
+                <button type="button" onClick={handleExportData}>
+                  <FaDownload />
+                  Export My Data
+                </button>
+
+                <button type="button" onClick={() => setConfirmAction("reset")}>
+                  <FaRedo />
+                  Reset Settings
+                </button>
+
+                <button type="button" onClick={() => setConfirmAction("logout")}>
+                  <FaSignOutAlt />
+                  Logout
+                </button>
+
+                <button
+                  type="button"
+                  className="settings-danger-btn"
+                  onClick={() => setConfirmAction("delete")}
+                >
+                  <FaTrash />
+                  Delete Account
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {confirmAction && confirmData && (
+            <div className="settings-confirm-overlay">
+              <div className="settings-confirm-box">
+                <button
+                  type="button"
+                  className="settings-confirm-close"
+                  onClick={() => setConfirmAction(null)}
+                >
+                  <FaTimes />
+                </button>
+
+                <div
+                  className={`settings-confirm-icon ${
+                    confirmData.danger ? "settings-confirm-icon--danger" : ""
+                  }`}
+                >
+                  {confirmData.icon}
+                </div>
+
+                <h2>{confirmData.title}</h2>
+
+                <p>{confirmData.text}</p>
+
+                <div className="settings-confirm-actions">
+                  <button
+                    type="button"
+                    className="settings-cancel-btn"
+                    onClick={() => setConfirmAction(null)}
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="button"
+                    className={
+                      confirmData.danger
+                        ? "settings-delete-confirm-btn"
+                        : "settings-confirm-btn"
+                    }
+                    onClick={confirmData.action}
+                  >
+                    {confirmData.buttonText}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <Footer />
+        </main>
+      </div>
+    </div>
+  );
+}

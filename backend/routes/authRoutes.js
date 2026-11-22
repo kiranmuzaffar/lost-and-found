@@ -1,0 +1,40 @@
+const express = require("express");
+const router = express.Router();
+const authMiddleware = require("../middleware/authMiddleware");
+const { upload } = require("../utils/uploads");
+
+const {
+  loginUser,
+  forgotPassword,
+  resetPassword,
+  sendSignupOtp,
+  verifySignupOtp,
+  getProfile,
+  updateProfile,
+  changePassword,
+  deleteMyAccount,
+  updateProfileImage,
+} = require("../controllers/authController");
+
+router.post("/login", loginUser);
+
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password/:token", resetPassword);
+
+router.post("/send-signup-otp", sendSignupOtp);
+router.post("/verify-signup-otp", verifySignupOtp);
+router.get("/profile", authMiddleware, getProfile);
+router.put("/profile", authMiddleware, updateProfile);
+router.get("/me", authMiddleware, getProfile);
+router.put("/change-password", authMiddleware, changePassword);
+
+router.delete("/me", authMiddleware, deleteMyAccount);
+
+router.put(
+  "/profile/image",
+  authMiddleware,
+  upload.single("profileImage"),
+  updateProfileImage
+);
+
+module.exports = router;

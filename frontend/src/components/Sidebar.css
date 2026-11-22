@@ -1,0 +1,290 @@
+.sidebar {
+  width: 260px;
+  height: calc(100vh - var(--navbar-height));
+  max-height: calc(100vh - var(--navbar-height));
+
+  background: var(--surface);
+
+  padding: 24px 18px;
+
+  border-right: 1px solid var(--border);
+
+  transition: margin-left 0.3s ease;
+
+  position: sticky;
+  top: var(--navbar-height);
+
+  align-self: flex-start;
+  flex-shrink: 0;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  z-index: 50;
+
+  box-sizing: border-box;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: rgba(14, 165, 233, 0.35);
+  border-radius: 20px;
+}
+
+.sidebar--closed {
+  margin-left: -260px;
+}
+
+/* LINKS */
+
+.sidebar__links {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  padding: 14px 16px;
+
+  border-radius: 14px;
+
+  text-decoration: none;
+
+  color: var(--text-2);
+
+  font-size: 15px;
+  font-weight: 600;
+
+  transition: 0.25s ease;
+}
+
+.sidebar__link svg {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.sidebar__link-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar__notification-badge {
+  margin-left: auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+
+  border-radius: 999px;
+  background: #22c55e;
+  color: white;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+
+  box-shadow: 0 6px 14px rgba(34, 197, 94, 0.32);
+}
+
+.sidebar__link--active .sidebar__notification-badge {
+  background: #22c55e;
+  color: white;
+}
+
+.sidebar__link:hover {
+  background: var(--accent-soft);
+
+  color: var(--accent-text);
+
+  transform: translateX(4px);
+}
+
+.sidebar__link--active {
+  background: linear-gradient(135deg, #0ea5e9, #8b5cf6);
+
+  color: white;
+}
+
+.sidebar__link--active:hover {
+  background: linear-gradient(135deg, #0ea5e9, #8b5cf6);
+
+  color: white;
+
+  transform: translateX(0);
+}
+
+/* PROFILE CARD */
+
+.sidebar__profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 12px 14px;
+
+  border-radius: 18px;
+
+  background: var(--surface-2);
+
+  text-decoration: none;
+
+  cursor: pointer;
+
+  transition: 0.25s ease;
+
+  overflow: hidden;
+}
+
+.sidebar__profile:hover {
+  background: var(--accent-soft);
+
+  transform: translateX(4px);
+}
+
+.sidebar__avatar {
+  width: 48px;
+  height: 48px;
+
+  min-width: 48px;
+  max-width: 48px;
+
+  border-radius: 50%;
+
+  background: linear-gradient(135deg, #0ea5e9, #8b5cf6);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  color: white;
+
+  font-size: 15px;
+  font-weight: 800;
+
+  overflow: hidden;
+
+  flex-shrink: 0;
+
+  border: 2px solid #ffffff;
+
+  box-shadow: 0 6px 16px rgba(14, 165, 233, 0.25);
+}
+
+.sidebar__avatar img {
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  object-fit: cover;
+  object-position: center;
+
+  border-radius: 50%;
+}
+
+.sidebar__profile-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar__profile h4 {
+  font-size: 15px;
+
+  color: var(--text);
+
+  margin-bottom: 4px;
+
+  line-height: 1.2;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar__profile p {
+  font-size: 13px;
+
+  color: var(--text-muted);
+
+  line-height: 1.2;
+
+  white-space: nowrap;
+}
+
+/* PAGE LAYOUT FIX */
+
+.home__container,
+.persons-container,
+.items-layout,
+.statistics__layout,
+.notifications__container,
+.myreports__container,
+.profile__container,
+.settings__container,
+.contact-layout,
+.faqs-layout,
+.privacy-layout,
+.terms-layout {
+  align-items: flex-start;
+}
+
+/* RESPONSIVE */
+.sidebar__backdrop {
+  position: fixed;
+  inset: var(--navbar-height) 0 0 0;
+  z-index: 997;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.sidebar__link:focus-visible,
+.sidebar__profile:focus-visible {
+  outline: 3px solid #8b5cf6;
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed;
+    top: var(--navbar-height);
+    left: 0;
+    width: min(280px, 82vw);
+    height: calc(100dvh - var(--navbar-height));
+    max-height: none;
+    margin-left: 0;
+    z-index: 998;
+    box-shadow: 12px 0 30px rgba(15, 23, 42, 0.18);
+    transform: translateX(0);
+    transition: transform 0.25s ease, visibility 0.25s;
+  }
+
+  .sidebar--closed {
+    margin-left: 0;
+    transform: translateX(-105%);
+    visibility: hidden;
+  }
+
+  .sidebar__link:hover,
+  .sidebar__profile:hover {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
+}

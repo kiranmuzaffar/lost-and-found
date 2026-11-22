@@ -1,0 +1,919 @@
+const Report = require("../models/report");
+const ReportComplaint = require("../models/reportComplaint");
+const User = require("../models/user");
+const {
+  PRIVATE_FIELDS,
+  toStoredPath,
+  sendStoredDocument,
+  removeStoredFiles,
+  removeUploadedRequestFiles,
+} = require("../utils/uploads");
+const { deleteReportsCascade } = require("../utils/cleanup");
+const { removeSuggestedMatchesForReport } = require("./adminController");
+
+const publicStatuses = ["verified", "matched", "closed"];
+
+const EDITABLE_REPORT_FIELDS = [
+  "city",
+  "caseStatus",
+  "itemName",
+  "itemCategory",
+  "itemColor",
+  "itemBrand",
+  "itemDescription",
+  "lostLocation",
+  "lostDate",
+  "foundLocation",
+  "foundDate",
+  "currentLocation",
+  "missingPersonName",
+  "missingPersonAge",
+  "missingPersonGender",
+  "missingPersonLastSeenLocation",
+  "missingPersonLastSeenDate",
+  "missingPersonDescription",
+  "reporterRelationship",
+  "foundPersonName",
+  "estimatedAge",
+  "foundPersonGender",
+  "foundPersonDescription",
+];
+
+// Sensitive fields that must never be sent to the public.
+const PUBLIC_HIDDEN_FIELDS = "-reporterIdCardImage -firReportImage -flags";
+
+const stripPrivateFields = (report) => {
+  const data = typeof report?.toObject === "function" ? report.toObject() : { ...report };
+  delete data.reporterIdCardImage;
+  delete data.firReportImage;
+  delete data.flags;
+  return data;
+};
+
+const isOwnerOrAdmin = (req, report) =>
+  Boolean(
+    req.user &&
+      (req.user.role === "admin" ||
+        (report.userId && String(report.userId) === String(req.user.id)))
+  );
+
+// "  lahore  cantt " -> "Lahore Cantt". Every report must name its city so
+// lists can be filtered by city and matching can compare cities.
+const normalizeCity = (value = "") =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/(^|[\s-])\S/g, (letter) => letter.toUpperCase());
+
+const requireCity = (value) => {
+  const city = normalizeCity(value);
+
+  if (!city || city.length > 60) {
+    const error = new Error("Please select the city of this report.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return city;
+};
+
+const normalizeEmail = (email = "") => String(email || "").trim().toLowerCase();
+
+const validateReporterPhone = (phone) => {
+  const normalizedPhone = String(phone || "").trim();
+  if (!/^\+92[0-9]{10}$/.test(normalizedPhone)) {
+    const error = new Error("Phone number must start with +92 and contain exactly 10 digits after it.");
+    error.statusCode = 400;
+    throw error;
+  }
+};
+
+const sendErrorResponse = async (res, error, req) => {
+  if (req) {
+    await removeUploadedRequestFiles(req);
+  }
+
+  return res.status(error.statusCode || 500).json({
+    message: error.message,
+  });
+};
+
+const getAuthenticatedReporter = async (req) => {
+  const user = await User.findById(req.user.id).select("fullName email phone address city");
+
+  if (!user) {
+    const error = new Error("Logged-in user not found. Please login again.");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const loggedInEmail = normalizeEmail(user.email);
+  const submittedEmail = normalizeEmail(req.body.reporterEmail);
+
+  if (submittedEmail && submittedEmail !== loggedInEmail) {
+    const error = new Error("Reporter email must match the logged-in account email.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    reporterFullName: user.fullName || String(req.body.reporterFullName || "").trim(),
+    reporterContactNumber: user.phone || String(req.body.reporterContactNumber || "").trim(),
+    reporterEmail: loggedInEmail,
+    reporterAddress: user.address || String(req.body.reporterAddress || "").trim(),
+    reporterCity: normalizeCity(user.city || req.body.reporterCity),
+  };
+};
+
+const escapeRegex = (value = "") => {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
+const normalizeQueryValue = (value = "") => String(value || "").trim();
+
+const normalizeReportTypeFilter = (value = "") => {
+  const normalized = normalizeQueryValue(value).toLowerCase();
+
+  if (!normalized || normalized === "all") return "";
+
+  if (["lost", "missing"].includes(normalized)) return "lost";
+  if (normalized === "found") return "found";
+
+  return "";
+};
+
+const buildPublicReportQuery = (queryParams = {}, fixedCategory = "") => {
+  const {
+    keyword,
+    search,
+    category,
+    reportType,
+    status,
+    gender,
+    itemCategory,
+    city,
+    caseStatus,
+  } = queryParams;
+
+  const query = {
+    status: { $in: publicStatuses },
+  };
+
+  const selectedCategory = normalizeQueryValue(fixedCategory || category).toLowerCase();
+
+  if (["item", "person"].includes(selectedCategory)) {
+    query.category = selectedCategory;
+  }
+
+  const selectedReportType = normalizeReportTypeFilter(reportType || status);
+
+  if (selectedReportType) {
+    query.reportType = selectedReportType;
+  }
+
+  const selectedCity = normalizeQueryValue(city);
+
+  if (selectedCity && selectedCity.toLowerCase() !== "all") {
+    query.city = { $regex: `^${escapeRegex(selectedCity)}$`, $options: "i" };
+  }
+
+  // "Solved" / "Unsolved" (anything that is not solved counts as unsolved).
+  const selectedCaseStatus = normalizeQueryValue(caseStatus).toLowerCase();
+
+  if (selectedCaseStatus === "solved") {
+    query.caseStatus = "Solved";
+  } else if (selectedCaseStatus === "unsolved") {
+    query.caseStatus = { $ne: "Solved" };
+  }
+
+  const selectedItemCategory = normalizeQueryValue(itemCategory);
+
+  if (selectedItemCategory && selectedItemCategory.toLowerCase() !== "all") {
+    query.itemCategory = {
+      $regex: `^${escapeRegex(selectedItemCategory)}$`,
+      $options: "i",
+    };
+  }
+
+  const selectedGender = normalizeQueryValue(gender);
+
+  if (selectedGender && selectedGender.toLowerCase() !== "all") {
+    query.$or = [
+      {
+        missingPersonGender: {
+          $regex: `^${escapeRegex(selectedGender)}$`,
+          $options: "i",
+        },
+      },
+      {
+        foundPersonGender: {
+          $regex: `^${escapeRegex(selectedGender)}$`,
+          $options: "i",
+        },
+      },
+    ];
+  }
+
+  const keywordValue = normalizeQueryValue(keyword || search);
+
+  if (keywordValue) {
+    const keywordRegex = { $regex: escapeRegex(keywordValue), $options: "i" };
+
+    const keywordSearch = [
+      { city: keywordRegex },
+      { itemName: keywordRegex },
+      { itemCategory: keywordRegex },
+      { itemColor: keywordRegex },
+      { itemBrand: keywordRegex },
+      { itemDescription: keywordRegex },
+      { lostLocation: keywordRegex },
+      { foundLocation: keywordRegex },
+      { currentLocation: keywordRegex },
+      { missingPersonName: keywordRegex },
+      { missingPersonGender: keywordRegex },
+      { missingPersonLastSeenLocation: keywordRegex },
+      { missingPersonDescription: keywordRegex },
+      { foundPersonName: keywordRegex },
+      { foundPersonGender: keywordRegex },
+      { foundPersonDescription: keywordRegex },
+      { reporterFullName: keywordRegex },
+      { reporterEmail: keywordRegex },
+      { reporterAddress: keywordRegex },
+    ];
+
+    if (query.$or) {
+      query.$and = [{ $or: query.$or }, { $or: keywordSearch }];
+      delete query.$or;
+    } else {
+      query.$or = keywordSearch;
+    }
+  }
+
+  return query;
+};
+
+const getPublicFilterOptions = async (category = "") => {
+  const baseQuery = {
+    status: { $in: publicStatuses },
+  };
+
+  if (category) {
+    baseQuery.category = category;
+  }
+
+  const [cities, categories] = await Promise.all([
+    Report.distinct("city", baseQuery),
+    category === "item" ? Report.distinct("itemCategory", baseQuery) : [],
+  ]);
+
+  return {
+    cities: cities.filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    categories: categories.filter(Boolean).sort((a, b) => a.localeCompare(b)),
+  };
+};
+
+const getPublicReportsResponse = async (req, res, fixedCategory = "", message = "Reports fetched successfully") => {
+  try {
+    const query = buildPublicReportQuery(req.query, fixedCategory);
+    const limitValue = Number(req.query.limit || 0);
+    const limit = Number.isFinite(limitValue) && limitValue > 0 ? limitValue : 0;
+
+    const reportsQuery = Report.find(query)
+      .select(PUBLIC_HIDDEN_FIELDS)
+      .sort({ createdAt: -1 });
+
+    if (limit) {
+      reportsQuery.limit(limit);
+    }
+
+    const [reports, total, filters] = await Promise.all([
+      reportsQuery,
+      Report.countDocuments(query),
+      getPublicFilterOptions(fixedCategory),
+    ]);
+
+    return res.status(200).json({
+      message,
+      count: reports.length,
+      total,
+      filters,
+      reports,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: error.message,
+    });
+  }
+};
+
+// CREATE LOST ITEM REPORT
+const createLostItemReport = async (req, res) => {
+  try {
+    const {
+      itemName,
+      itemCategory,
+      itemColor,
+      itemBrand,
+      lostLocation,
+      lostDate,
+      itemDescription,
+      city,
+      reporterFullName,
+      reporterContactNumber,
+      reporterEmail,
+      reporterAddress,
+    } = req.body;
+
+    const reporter = await getAuthenticatedReporter(req);
+    validateReporterPhone(reporter.reporterContactNumber);
+
+    const newReport = new Report({
+      userId: req.user ? req.user.id : null,
+      reportType: "lost",
+      category: "item",
+      city: requireCity(city),
+
+      itemName,
+      itemCategory,
+      itemColor,
+      itemBrand,
+      lostLocation,
+      lostDate,
+      itemDescription,
+
+      ...reporter,
+
+      lostItemImage: req.files?.lostItemImage
+        ? toStoredPath(req.files.lostItemImage[0])
+        : "",
+
+      reporterIdCardImage: req.files?.reporterIdCardImage
+        ? toStoredPath(req.files.reporterIdCardImage[0])
+        : "",
+    });
+
+    await newReport.save();
+
+    res.status(201).json({
+      message: "Lost item report submitted successfully",
+      report: newReport,
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// CREATE FOUND ITEM REPORT
+const createFoundItemReport = async (req, res) => {
+  try {
+    const {
+      itemName,
+      itemCategory,
+      itemColor,
+      itemBrand,
+      foundLocation,
+      foundDate,
+      currentLocation,
+      itemDescription,
+      city,
+      reporterFullName,
+      reporterContactNumber,
+      reporterEmail,
+      reporterAddress,
+    } = req.body;
+
+    const reporter = await getAuthenticatedReporter(req);
+    validateReporterPhone(reporter.reporterContactNumber);
+
+    const newReport = new Report({
+      userId: req.user ? req.user.id : null,
+      reportType: "found",
+      category: "item",
+      city: requireCity(city),
+
+      itemName,
+      itemCategory,
+      itemColor,
+      itemBrand,
+      foundLocation,
+      foundDate,
+      currentLocation,
+      itemDescription,
+
+      ...reporter,
+
+      foundItemImage: req.files?.foundItemImage
+        ? toStoredPath(req.files.foundItemImage[0])
+        : "",
+
+      reporterIdCardImage: req.files?.reporterIdCardImage
+        ? toStoredPath(req.files.reporterIdCardImage[0])
+        : "",
+    });
+
+    await newReport.save();
+
+    res.status(201).json({
+      message: "Found item report submitted successfully",
+      report: newReport,
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// CREATE MISSING PERSON REPORT
+const createMissingPersonReport = async (req, res) => {
+  try {
+    const {
+      missingPersonName,
+      missingPersonAge,
+      missingPersonGender,
+      missingPersonLastSeenLocation,
+      missingPersonLastSeenDate,
+      missingPersonDescription,
+      city,
+      reporterFullName,
+      reporterContactNumber,
+      reporterEmail,
+      reporterAddress,
+      reporterRelationship,
+    } = req.body;
+
+    const reporter = await getAuthenticatedReporter(req);
+    validateReporterPhone(reporter.reporterContactNumber);
+
+    const newReport = new Report({
+      userId: req.user ? req.user.id : null,
+      reportType: "lost",
+      category: "person",
+      city: requireCity(city),
+
+      missingPersonName,
+      missingPersonAge,
+      missingPersonGender,
+      missingPersonLastSeenLocation,
+      missingPersonLastSeenDate,
+      missingPersonDescription,
+
+      ...reporter,
+      reporterRelationship,
+
+      missingPersonImage: req.files?.missingPersonImage
+        ? toStoredPath(req.files.missingPersonImage[0])
+        : "",
+
+      reporterIdCardImage: req.files?.reporterIdCardImage
+        ? toStoredPath(req.files.reporterIdCardImage[0])
+        : "",
+
+      firReportImage: req.files?.firReportImage
+        ? toStoredPath(req.files.firReportImage[0])
+        : "",
+    });
+
+    await newReport.save();
+
+    res.status(201).json({
+      message: "Missing person report submitted successfully",
+      report: newReport,
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// CREATE FOUND PERSON REPORT
+const createFoundPersonReport = async (req, res) => {
+  try {
+    const {
+      foundPersonName,
+      estimatedAge,
+      foundPersonGender,
+      foundLocation,
+      foundDate,
+      currentLocation,
+      foundPersonDescription,
+      city,
+      reporterFullName,
+      reporterContactNumber,
+      reporterEmail,
+      reporterAddress,
+      reporterRelationship,
+    } = req.body;
+
+    const reporter = await getAuthenticatedReporter(req);
+    validateReporterPhone(reporter.reporterContactNumber);
+
+    const newReport = new Report({
+      userId: req.user ? req.user.id : null,
+      reportType: "found",
+      category: "person",
+      city: requireCity(city),
+
+      foundPersonName,
+      estimatedAge,
+      foundPersonGender,
+      foundLocation,
+      foundDate,
+      currentLocation,
+      foundPersonDescription,
+
+      ...reporter,
+      reporterRelationship,
+
+      foundPersonImage: req.files?.foundPersonImage
+        ? toStoredPath(req.files.foundPersonImage[0])
+        : "",
+
+      reporterIdCardImage: req.files?.reporterIdCardImage
+        ? toStoredPath(req.files.reporterIdCardImage[0])
+        : "",
+    });
+
+    await newReport.save();
+
+    res.status(201).json({
+      message: "Found person report submitted successfully",
+      report: newReport,
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// GET ALL PUBLIC REPORTS
+const getAllReports = async (req, res) => {
+  return getPublicReportsResponse(
+    req,
+    res,
+    "",
+    "Reports fetched successfully"
+  );
+};
+
+// GET ITEM REPORTS ONLY
+const getItemReports = async (req, res) => {
+  return getPublicReportsResponse(
+    req,
+    res,
+    "item",
+    "Item reports fetched successfully"
+  );
+};
+
+// GET PERSON REPORTS ONLY
+const getPersonReports = async (req, res) => {
+  return getPublicReportsResponse(
+    req,
+    res,
+    "person",
+    "Person reports fetched successfully"
+  );
+};
+
+// SEARCH AND FILTER PUBLIC REPORTS
+const searchReports = async (req, res) => {
+  return getPublicReportsResponse(
+    req,
+    res,
+    "",
+    "Reports searched successfully"
+  );
+};
+
+// GET SINGLE REPORT BY ID
+const getReportById = async (req, res) => {
+  try {
+    const report = await Report.findById(req.params.id);
+    const canSeePrivate = report ? isOwnerOrAdmin(req, report) : false;
+
+    // Pending/rejected reports are visible only to their owner or an admin.
+    if (!report || (!publicStatuses.includes(report.status) && !canSeePrivate)) {
+      return res.status(404).json({
+        message: "Report not found",
+      });
+    }
+
+    res.status(200).json({
+      message: "Report fetched successfully",
+      report: canSeePrivate ? report : stripPrivateFields(report),
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// GET MY REPORTS
+const getMyReports = async (req, res) => {
+  try {
+    const reports = await Report.find({ userId: req.user.id }).sort({
+      createdAt: -1,
+    });
+
+    res.status(200).json({
+      message: "My reports fetched successfully",
+      reports,
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// REPORT A POST
+const reportPost = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const reportId = req.params.id;
+
+    if (!reason) {
+      return res.status(400).json({
+        message: "Reason is required",
+      });
+    }
+
+    const report = await Report.findById(reportId);
+
+    if (!report) {
+      return res.status(404).json({
+        message: "Report not found",
+      });
+    }
+
+    if (report.userId && report.userId.toString() === req.user.id) {
+      return res.status(400).json({
+        message: "You cannot report your own post",
+      });
+    }
+
+    const alreadyFlagged = report.flags?.some(
+      (flag) => flag.userId?.toString() === req.user.id
+    );
+
+    if (alreadyFlagged) {
+      return res.status(400).json({
+        message: "You have already reported this post",
+      });
+    }
+
+    const user = await User.findById(req.user.id).select("fullName email");
+
+    const newComplaint = new ReportComplaint({
+      reportId,
+      userId: req.user.id,
+      reason,
+    });
+
+    await newComplaint.save();
+
+    const updatedReport = await Report.findByIdAndUpdate(
+      reportId,
+      {
+        $push: {
+          flags: {
+            userId: req.user.id,
+            userName: user?.fullName || user?.email || "User",
+            reason,
+            date: new Date(),
+          },
+        },
+        $inc: {
+          flagCount: 1,
+        },
+      },
+      {
+        returnDocument: "after",
+      }
+    );
+
+    res.status(201).json({
+      message: "Post reported successfully. Admin will review it.",
+      report: stripPrivateFields(updatedReport),
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// DELETE MY REPORT
+const deleteMyReport = async (req, res) => {
+  try {
+    const report = await Report.findOne({
+      _id: req.params.id,
+      userId: req.user.id,
+    }).select("_id");
+
+    if (!report) {
+      return res.status(404).json({
+        message: "Report not found or you are not allowed to delete it",
+      });
+    }
+
+    await deleteReportsCascade([report._id]);
+
+    res.status(200).json({
+      message: "Report deleted successfully",
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// UPDATE MY REPORT CASE STATUS
+const updateMyReportStatus = async (req, res) => {
+  try {
+    const { caseStatus } = req.body;
+
+    const allowedCaseStatuses = ["Unsolved", "Solved", "Closed"];
+
+    if (!allowedCaseStatuses.includes(caseStatus)) {
+      return res.status(400).json({
+        message: "Invalid case status value",
+      });
+    }
+
+    const report = await Report.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        userId: req.user.id,
+      },
+      {
+        caseStatus,
+      },
+      {
+        returnDocument: "after",
+        runValidators: true,
+      }
+    );
+
+    if (!report) {
+      return res.status(404).json({
+        message: "Report not found or you are not allowed to update it",
+      });
+    }
+
+    res.status(200).json({
+      message: "Case status updated successfully",
+      report,
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// UPDATE MY REPORT DETAILS
+const updateMyReport = async (req, res) => {
+  try {
+    const existingReport = await Report.findOne({
+      _id: req.params.id,
+      userId: req.user.id,
+    });
+
+    if (!existingReport) {
+      const error = new Error("Report not found or you are not allowed to update it");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (["matched", "closed"].includes(existingReport.status)) {
+      const error = new Error("Matched or closed reports cannot be edited.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Only plain content fields can be changed. Status, verification, match
+    // data and file paths are never taken from the request body.
+    const updateData = {};
+    EDITABLE_REPORT_FIELDS.forEach((field) => {
+      if (req.body?.[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    });
+
+    // Any edit sends a verified/rejected report back to admin review, so
+    // content cannot be changed after verification without a new check.
+    if (existingReport.status !== "pending") {
+      updateData.status = "pending";
+      updateData.isVerified = false;
+    }
+
+    const reporter = await getAuthenticatedReporter(req);
+    const submittedReporterPhone = req.body?.reporterContactNumber;
+    updateData.reporterFullName = reporter.reporterFullName;
+    updateData.reporterContactNumber = submittedReporterPhone === undefined
+      ? reporter.reporterContactNumber
+      : String(submittedReporterPhone).trim();
+    validateReporterPhone(updateData.reporterContactNumber);
+    updateData.reporterEmail = reporter.reporterEmail;
+    updateData.reporterAddress = reporter.reporterAddress;
+    updateData.reporterCity = reporter.reporterCity;
+
+    if (updateData.city !== undefined) {
+      updateData.city = requireCity(updateData.city);
+    }
+
+    const imageFieldNames = [
+      "lostItemImage",
+      "foundItemImage",
+      "missingPersonImage",
+      "foundPersonImage",
+    ];
+
+    imageFieldNames.forEach((fieldName) => {
+      if (req.files?.[fieldName]?.[0]) {
+        updateData[fieldName] = toStoredPath(req.files[fieldName][0]);
+      }
+    });
+
+    const report = await Report.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        userId: req.user.id,
+      },
+      updateData,
+      {
+        returnDocument: "after",
+        runValidators: true,
+      }
+    );
+
+    if (!report) {
+      return res.status(404).json({
+        message: "Report not found or you are not allowed to update it",
+      });
+    }
+
+    // Remove image files that were replaced.
+    await removeStoredFiles(
+      imageFieldNames
+        .filter((fieldName) => updateData[fieldName] && existingReport[fieldName] !== updateData[fieldName])
+        .map((fieldName) => existingReport[fieldName])
+    );
+
+    const sentForReview = existingReport.status !== "pending";
+
+    if (sentForReview) {
+      await removeSuggestedMatchesForReport(report._id);
+    }
+
+    res.status(200).json({
+      message: sentForReview
+        ? "Report updated successfully. It will be visible again after admin verification."
+        : "Report updated successfully",
+      report,
+    });
+  } catch (error) {
+    sendErrorResponse(res, error, req);
+  }
+};
+
+// GET CNIC / FIR DOCUMENT (owner or admin only)
+const getReportDocument = async (req, res) => {
+  try {
+    const { id, field } = req.params;
+
+    if (!PRIVATE_FIELDS.includes(field)) {
+      return res.status(400).json({
+        message: "Invalid document type",
+      });
+    }
+
+    const report = await Report.findById(id).select(`userId ${field}`);
+
+    if (!report || !isOwnerOrAdmin(req, report)) {
+      return res.status(404).json({
+        message: "Document not found",
+      });
+    }
+
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
+    const sent = report[field] && (await sendStoredDocument(res, report[field]));
+
+    if (!sent && !res.headersSent) {
+      res.status(404).json({ message: "Document not found" });
+    }
+  } catch (error) {
+    sendErrorResponse(res, error);
+  }
+};
+
+module.exports = {
+  getReportDocument,
+  createLostItemReport,
+  createFoundItemReport,
+  createMissingPersonReport,
+  createFoundPersonReport,
+  getAllReports,
+  getItemReports,
+  getPersonReports,
+  getReportById,
+  getMyReports,
+  reportPost,
+  deleteMyReport,
+  updateMyReportStatus,
+  updateMyReport,
+  searchReports,
+};

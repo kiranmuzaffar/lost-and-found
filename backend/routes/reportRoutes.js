@@ -1,0 +1,117 @@
+const express = require("express");
+const router = express.Router();
+const authMiddleware = require("../middleware/authMiddleware");
+const { optionalAuth } = authMiddleware;
+const { upload } = require("../utils/uploads");
+
+const {
+  createLostItemReport,
+  createFoundItemReport,
+  createMissingPersonReport,
+  createFoundPersonReport,
+  getAllReports,
+  getItemReports,
+  getPersonReports,
+  getReportById,
+  getMyReports,
+  reportPost,
+  deleteMyReport,
+  updateMyReportStatus,
+  updateMyReport,
+  searchReports,
+  getReportDocument,
+} = require("../controllers/reportController");
+
+// Create Lost Item Report
+router.post(
+  "/lost-item",
+  authMiddleware,
+  upload.fields([
+    { name: "lostItemImage", maxCount: 1 },
+    { name: "reporterIdCardImage", maxCount: 1 },
+  ]),
+  createLostItemReport
+);
+
+// Create Found Item Report
+router.post(
+  "/found-item",
+  authMiddleware,
+  upload.fields([
+    { name: "foundItemImage", maxCount: 1 },
+    { name: "reporterIdCardImage", maxCount: 1 },
+  ]),
+  createFoundItemReport
+);
+
+// Create Missing Person Report
+router.post(
+  "/missing-person",
+  authMiddleware,
+  upload.fields([
+    { name: "missingPersonImage", maxCount: 1 },
+    { name: "reporterIdCardImage", maxCount: 1 },
+    { name: "firReportImage", maxCount: 1 },
+  ]),
+  createMissingPersonReport
+);
+
+// Create Found Person Report
+router.post(
+  "/found-person",
+  authMiddleware,
+  upload.fields([
+    { name: "foundPersonImage", maxCount: 1 },
+    { name: "reporterIdCardImage", maxCount: 1 },
+  ]),
+  createFoundPersonReport
+);
+
+// Report a post/flag a post
+router.post("/:id/report-post", authMiddleware, reportPost);
+
+router.post("/:id/flags", authMiddleware, reportPost);
+
+// Get all reports
+router.get("/", getAllReports);
+
+// Get item reports only
+router.get("/items", getItemReports);
+
+// Get person reports only
+router.get("/persons", getPersonReports);
+
+// Get my reports
+router.get("/my-reports", authMiddleware, getMyReports);
+
+router.get("/my", authMiddleware, getMyReports);
+
+// Search and filter reports
+router.get("/search", searchReports);
+
+// Delete my report
+router.delete("/my-reports/:id", authMiddleware, deleteMyReport);
+
+// Update my report status
+router.patch("/my-reports/:id/status", authMiddleware, updateMyReportStatus);
+
+// Update my report details
+router.put(
+  "/my-reports/:id",
+  authMiddleware,
+  upload.fields([
+    { name: "lostItemImage", maxCount: 1 },
+    { name: "foundItemImage", maxCount: 1 },
+    { name: "missingPersonImage", maxCount: 1 },
+    { name: "foundPersonImage", maxCount: 1 },
+  ]),
+  updateMyReport
+);
+
+// Get CNIC / FIR document of a report (owner or admin only)
+router.get("/:id/documents/:field", authMiddleware, getReportDocument);
+
+// Get single report by ID (pending/rejected reports only for owner or admin)
+router.get("/:id", optionalAuth, getReportById);
+
+module.exports = router;

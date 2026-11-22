@@ -1,0 +1,276 @@
+.login {
+  min-height: 100vh;
+
+  display: grid;
+
+  grid-template-columns: 1fr 1fr;
+
+  background:
+    var(--auth-bg);
+}
+
+/* LEFT */
+
+.login__left {
+  background:
+    linear-gradient(
+      rgba(14, 165, 233, 0.78),
+      rgba(139, 92, 246, 0.78)
+    ),
+    url("../assets/hero1.jpeg");
+
+  background-size: cover;
+  background-position: center;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login__overlay {
+  padding: 40px;
+}
+
+.login__content {
+  color: white;
+  text-align: center;
+}
+
+.login__content h1 {
+  font-size: 52px;
+  font-weight: 800;
+
+  margin-bottom: 18px;
+}
+
+.login__content p {
+  font-size: 18px;
+  line-height: 1.7;
+}
+
+/* RIGHT */
+
+.login__right {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  padding: 40px;
+}
+
+.login__card {
+  width: 100%;
+  max-width: 460px;
+
+  background: var(--surface-glass);
+
+  backdrop-filter: blur(18px);
+
+  padding: 42px;
+
+  border-radius: 28px;
+
+  border: 1px solid rgba(255,255,255,0.7);
+
+  box-shadow:
+    0 10px 40px rgba(124, 58, 237, 0.12),
+    0 8px 25px rgba(59, 130, 246, 0.1);
+}
+
+.login__card h2 {
+  font-size: 36px;
+  font-weight: 800;
+
+  color: var(--text);
+
+  margin-bottom: 10px;
+}
+
+.login__subtitle {
+  color: var(--text-muted);
+
+  margin-bottom: 28px;
+}
+
+/* FORM */
+
+.login__form {
+  display: flex;
+  flex-direction: column;
+
+  gap: 20px;
+}
+
+.login__field {
+  display: flex;
+  flex-direction: column;
+}
+
+.login__field label {
+  margin-bottom: 8px;
+
+  font-weight: 600;
+
+  color: var(--text-2);
+}
+
+.login__field input {
+  padding: 15px 16px;
+
+  border-radius: 16px;
+
+  border: 1px solid var(--border);
+
+  background: var(--surface-glass);
+
+  font-size: 15px;
+
+  outline: none;
+
+  transition: 0.3s ease;
+}
+
+.login__field input:focus {
+  border-color: #818cf8;
+
+  box-shadow:
+    0 0 0 4px rgba(129,140,248,0.15);
+}
+
+.login__btn {
+  margin-top: 10px;
+
+  border: none;
+
+  padding: 16px;
+
+  border-radius: 18px;
+
+  background:
+    linear-gradient(135deg,#0ea5e9,#8b5cf6);
+
+  color: white;
+
+  font-size: 16px;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition: 0.3s ease;
+}
+
+.login__btn:hover {
+  transform: translateY(-2px);
+
+  box-shadow:
+    0 12px 25px rgba(14, 165, 233, 0.3);
+}
+
+.login__options{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  margin-bottom: 20px;
+  gap: 10px;
+}
+
+.login__remember{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #555;
+  cursor: pointer;
+}
+
+.login__remember input{
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.login__forgot{
+  font-size: 14px;
+  color: #2563eb;
+  text-decoration: none;
+  transition: 0.3s;
+}
+
+.login__forgot:hover{
+  text-decoration: underline;
+}
+
+.login__password-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.login__password-wrap input {
+  width: 100%;
+  padding-right: 78px;
+}
+
+.login__password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.login__password-toggle:hover {
+  color: #0ea5e9;
+}
+
+/* RESPONSIVE */
+
+@media (max-width: 900px) {
+
+  .login {
+    grid-template-columns: 1fr;
+  }
+
+  .login__left {
+    display: none;
+  }
+}
+.login__message {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login__message--success {
+  background: var(--success-soft);
+  color: var(--success-text);
+  border: 1px solid #a7f3d0;
+}
+
+.login__message--error {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  border: 1px solid #fecaca;
+}
+
+.login__bottom {
+  margin-top: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.login__bottom span {
+  color: #2563eb;
+  font-weight: 700;
+  cursor: pointer;
+}

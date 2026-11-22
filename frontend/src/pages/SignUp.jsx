@@ -1,0 +1,243 @@
+import "./SignUp.css";
+import BackButton from "../components/BackButton";
+
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { sendSignupOtp } from "../api/authApi";
+import { isValidPhoneNumber, normalizePhoneNumber } from "../utils/phoneNumber";
+
+const defaultAdminEmail = "admin@lostfound.com";
+
+const normalizeEmail = (email = "") => String(email).trim().toLowerCase();
+
+export default function SignUp() {
+  const navigate = useNavigate();
+
+  const [formData, setFormData] = useState({
+    fullName: "",
+    email: "",
+    phone: "+92",
+    password: "",
+    confirmPassword: "",
+  });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [message, setMessage] = useState({ type: "", text: "" });
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.name === "phone" ? normalizePhoneNumber(e.target.value) : e.target.value });
+    setMessage({ type: "", text: "" });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    const passwordRegex =
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
+
+    const cleanEmail = normalizeEmail(formData.email);
+
+    if (!formData.fullName.trim()) {
+      setMessage({ type: "error", text: "Please enter your full name." });
+      return;
+    }
+
+    if (!emailRegex.test(cleanEmail)) {
+      setMessage({ type: "error", text: "Please enter a valid email address." });
+      return;
+    }
+
+    if (cleanEmail === normalizeEmail(defaultAdminEmail)) {
+      setMessage({
+        type: "error",
+        text: "This email is reserved for admin. Please use another email.",
+      });
+      return;
+    }
+
+    if (!isValidPhoneNumber(formData.phone)) {
+      setMessage({ type: "error", text: "Enter 10 digits after the +92 prefix." });
+      return;
+    }
+
+    if (!passwordRegex.test(formData.password)) {
+      setMessage({
+        type: "error",
+        text: "Password must contain uppercase, lowercase, number, special character and minimum 8 characters.",
+      });
+      return;
+    }
+
+    if (formData.password !== formData.confirmPassword) {
+      setMessage({ type: "error", text: "Passwords do not match." });
+      return;
+    }
+
+    const userData = {
+      fullName: formData.fullName.trim(),
+      email: cleanEmail,
+      phone: formData.phone.trim(),
+      password: formData.password,
+    };
+
+    const pendingSignup = {
+      email: cleanEmail,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    };
+
+    setIsSubmitting(true);
+
+    try {
+      await sendSignupOtp(userData);
+
+      sessionStorage.setItem("lostFoundPendingSignup", JSON.stringify(pendingSignup));
+
+      setMessage({
+        type: "success",
+        text: "OTP sent successfully. Please verify your email.",
+      });
+
+      navigate("/verify-otp", { state: { email: cleanEmail, userData } });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error.message || "Signup OTP could not be sent.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="signup">
+      <BackButton className="auth-back" fallback="/" />
+      <div className="signup__left">
+        <div className="signup__overlay">
+          <div className="signup__content">
+            <h1>Lost & Found</h1>
+            <p>
+              Join our community and help reunite lost people and belongings
+              safely.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="signup__right">
+        <div className="signup__card">
+          <h2>Create Account</h2>
+          <p className="signup__subtitle">Sign up to continue</p>
+
+          {message.text && (
+            <div className={`signup__message signup__message--${message.type}`}>
+              {message.text}
+            </div>
+          )}
+
+          <form className="signup__form" onSubmit={handleSubmit}>
+            <div className="signup__field">
+              <label>Full Name</label>
+              <input
+                type="text"
+                name="fullName"
+                placeholder="Enter your name"
+                value={formData.fullName}
+                onChange={handleChange}
+                pattern="[A-Za-z ]{3,}"
+                title="Name should contain only alphabets and at least 3 letters"
+                required
+              />
+            </div>
+
+            <div className="signup__field">
+              <label>Email Address</label>
+              <input
+                type="email"
+                name="email"
+                placeholder="Enter your email"
+                value={formData.email}
+                onChange={handleChange}
+                required
+              />
+            </div>
+
+            <div className="signup__field">
+  <label>Phone Number</label>
+
+  <input
+    type="tel"
+    name="phone"
+    placeholder="+923001234567"
+    value={formData.phone}
+    onChange={handleChange}
+    pattern="\+92[0-9]{10}"
+    maxLength={13}
+    title="Phone number must start with +92 and contain exactly 10 digits after it"
+    required
+  />
+</div>
+
+            <div className="signup__field">
+  <label>Password</label>
+
+  <div className="signup__password-wrap">
+    <input
+      type={showPassword ? "text" : "password"}
+      name="password"
+      placeholder="Create password"
+      value={formData.password}
+      onChange={handleChange}
+      required
+    />
+
+    <button
+      type="button"
+      className="signup__password-toggle"
+      onClick={() => setShowPassword((prev) => !prev)}
+      aria-label={showPassword ? "Hide password" : "Show password"}
+    >
+      {showPassword ? "Hide" : "Show"}
+    </button>
+  </div>
+</div>
+
+            <div className="signup__field">
+  <label>Confirm Password</label>
+
+  <div className="signup__password-wrap">
+    <input
+      type={showConfirmPassword ? "text" : "password"}
+      name="confirmPassword"
+      placeholder="Confirm password"
+      value={formData.confirmPassword}
+      onChange={handleChange}
+      required
+    />
+
+    <button
+      type="button"
+      className="signup__password-toggle"
+      onClick={() => setShowConfirmPassword((prev) => !prev)}
+      aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+    >
+      {showConfirmPassword ? "Hide" : "Show"}
+    </button>
+  </div>
+</div>
+
+            <button className="signup__btn" disabled={isSubmitting}>
+              {isSubmitting ? "Sending OTP..." : "Create Account"}
+            </button>
+          </form>
+
+          <p className="signup__bottom">
+            Already have an account? <span onClick={() => navigate("/login")}>Login</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
