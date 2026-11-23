@@ -55,33 +55,15 @@ It supports both registered and unregistered users, while administrators are res
 
 ## 📚 Libraries and Packages
 
- Express.js 
- Mongoose 
- JWT
- Bcrypt.js
- CORS
- Cloudinary
- Chart.js 
- Nodemailer
- Axios
-
-## 💻 Development Tools
-
- Visual Studio Code
- Git
- GitHub
- GitHub Desktop
-
-## 📂 Project Structure
-
-lost-and-found/
-│
-├── frontend/          # React.js user interface
-│
-├── backend/           # Node.js and Express.js server
-│
-└── README.md          # Project documentation
-
+- Express.js 
+- Mongoose 
+- JWT
+- Bcrypt.js
+- CORS
+- Cloudinary
+- Chart.js 
+- Nodemailer
+- Axios
 ## 🔄 System Workflow
 
 1. Users access the platform and search for lost or found reports.
